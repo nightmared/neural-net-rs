@@ -10,7 +10,7 @@ pub enum CostFunction {
 #[derive(Debug)]
 pub struct Brain {
     cost: CostFunction,
-	pub layers: Vec<Layer>,
+    pub layers: Vec<Layer>,
     pub learn_rate: f64
 }
 
@@ -55,16 +55,18 @@ impl Brain {
         let dataset_size = data.len();
         assert_eq!(dataset_size, expected_result.len());
 
-        let mut delta = Vec::with_capacity(self.layers.len());
+        let mut delta: Vec<Vec<f64>> = Vec::with_capacity(self.layers.len());
         for layer in (1..self.layers.len()).rev() {
             delta.push(Vec::with_capacity(self.layers[layer].neurons.len()));
         }
 
-        for layer in (1..self.layers.len()).rev() {
-            for e in 0..dataset_size {
-                self.run(data[e]);
+        for e in 0..dataset_size {
+            delta.clear();
+            self.run(data[e]);
+            for layer in (1..self.layers.len()).rev() {
+                let mut delta_layer = Vec::with_capacity(self.layers[layer].neurons.len());
                 for neuron in 0..self.layers[layer].neurons.len() {
-                    delta[layer].push( 
+                    delta_layer.push(
                         if layer == self.layers.len()-1 {
                             // compute ΔC
                             match self.cost {
@@ -73,11 +75,18 @@ impl Brain {
                                 }
                             }
                         } else {
-//                            vector_sum(self.layers[layer].neurons
+                            let mut tmp = 0.;
+                            for next_neuron in 0..self.layers[layer+1].neurons.len() {
+                                tmp += delta[layer+1][next_neuron] * self.layers[layer+1].neurons[next_neuron].weights[neuron];
+                            }
+                            tmp * self.layers[layer].act_fun_derivative(self.layers[layer].neurons_results[neuron])
                     });
                 }
+                // TODO: get rid of this mess
+                delta.push(delta_layer);
             }
-
+        }
+        for layer in (1..self.layers.len()).rev() {
             for neuron in 0..self.layers[layer].neurons.len() {
                 for wk in 0..self.layers[layer].neurons[neuron].weights.len() {
                     self.layers[layer].neurons[neuron].weights[wk] -= self.learn_rate/(dataset_size as f64) * delta[layer][neuron] * self.layers[layer-1].layer_results[wk];
