@@ -1,76 +1,111 @@
-use neuron::Neuron;
-use rand;
+use rand::{thread_rng, Rng};
 
-#[derive(Debug)]
-pub enum LayerKind {
-    // Input neurons
-    Identity,
-    // sigmoid activation function
-    Linear
+pub trait Layer {
+    fn new(input_size: usize, output_size: usize) -> Self;
+    fn size(&self) -> usize;
+    fn act_fun(f64) -> f64;
+    fn act_fun_derivative(f64) -> f64;
+    fn forward(&mut self, &[f64]) -> &[f64];
+    fn get_outputs(&self) -> &[f64];
+    fn get_potentials(&self) -> &[f64];
+    fn get_weight(&self, from: usize, to: usize) -> f64;
+    fn get_bias(&self, neuron: usize) -> f64;
+    fn set_weight(&mut self, from: usize, to: usize, val: f64);
+    fn set_bias(&mut self, neuron: usize, val: f64);
+    fn add_weight(&mut self, from: usize, to: usize, val: f64);
+    fn add_bias(&mut self, neuron: usize, val: f64);
 }
 
-#[derive(Debug)]
-pub struct Layer {
-    kind: LayerKind,
-	pub neurons: Vec<Neuron>,
+#[derive(Debug, Clone)]
+pub struct Linear {
+    pub length: usize,
+    // Matrix of all the weights
+    // wij = weights[i*self.length+j]
+    pub weights: Vec<f64>,
+    pub bias: Vec<f64>,
     // temporary storage for results of the sum Σw*x+b
-	pub neurons_results: Vec<f64>,
-    // results : layer_results = act_fun(neurons_results) 
-    pub layer_results: Vec<f64>
+    pub potentials: Vec<f64>,
+    // after activation
+    pub outputs: Vec<f64>
 }
 
-fn sigmoid(x: f64) -> f64 {
-    1./(1.+f64::exp(-x))
+impl Layer for Linear {
+    fn new(input_size: usize, output_size: usize) -> Linear {
+        let mut rng = thread_rng();
+        let mut weights = vec![0.; output_size*input_size];
+        let mut bias = vec![0.; output_size];
+        let potentials = vec![0.; output_size];
+        let outputs = vec![0.; output_size];
+        for i in 0..weights.len() {
+            weights[i] = rng.gen::<f64>() - 0.5;
+        }
+        for i in 0..bias.len() {
+            bias[i] = rng.gen::<f64>() - 0.5;
+        }
+        Linear {
+            length: output_size,
+            weights,
+            bias,
+            potentials,
+            outputs
+        }
+    }
+    fn size(&self) -> usize {
+        self.length
+    }
+    fn act_fun(x: f64) -> f64 {
+        // sigmoid
+        1./(1.+f64::exp(-x))
+    }
+    fn act_fun_derivative(x: f64) -> f64 {
+        let exp = f64::exp(-x);
+        exp/(1. + exp)/(1. + exp)
+    }
+    fn forward(&mut self, previous_layer: &[f64]) -> &[f64] {
+        for i in 0..self.length {
+            self.potentials[i] = vector_dot(previous_layer, &self.weights[i*self.length..(i+1)*self.length], self.bias[i]);
+            self.outputs[i] = Self::act_fun(self.potentials[i]);
+        }
+        &self.outputs
+    }
+    #[inline]
+    fn get_outputs(&self) -> &[f64] {
+        &self.outputs
+    }
+    #[inline]
+    fn get_potentials(&self) -> &[f64] {
+        &self.potentials
+    }
+    #[inline]
+    fn get_weight(&self, from: usize, to: usize) -> f64 {
+       self.weights[to*self.length+from] 
+    }
+    #[inline]
+    fn get_bias(&self, neuron: usize) -> f64 {
+        self.bias[neuron]
+    }
+    #[inline]
+    fn set_weight(&mut self, from: usize, to: usize, val: f64) {
+       self.weights[to*self.length+from] = val;
+    }
+    #[inline]
+    fn set_bias(&mut self, neuron: usize, val: f64) {
+        self.bias[neuron] = val;
+    }
+    #[inline]
+    fn add_weight(&mut self, from: usize, to: usize, val: f64) {
+       self.weights[to*self.length+from] += val;
+    }
+    #[inline]
+    fn add_bias(&mut self, neuron: usize, val: f64) {
+        self.bias[neuron] += val;
+    }
 }
 
-fn vector_sum(previous_layer: &[f64], weights: &[f64], bias: f64) -> f64 {
+
+#[inline]
+fn vector_dot(previous_layer: &[f64], weights: &[f64], bias: f64) -> f64 {
     previous_layer.iter()
         .zip(weights.iter())
         .fold(bias, |acc, (&v, &w)| acc + v*w)
-}
-
-impl Layer {
-    pub fn new(kind: LayerKind, input_size: usize, output_size: usize) -> Layer {
-        let mut neurons = Vec::with_capacity(output_size);
-        let mut layer_results = Vec::with_capacity(output_size);
-        let mut neurons_results = Vec::with_capacity(output_size);
-        for _ in 0..output_size {
-            neurons.push(Neuron::new(input_size));
-            layer_results.push(rand::random::<f64>());
-            neurons_results.push(0.);
-        }
-
-        Layer {
-            kind,
-            neurons,
-            neurons_results,
-            layer_results
-        }
-    }
-
-    pub fn size(&self) -> usize {
-        self.neurons.len()
-    }
-
-    pub fn act_fun(&self, x: f64) -> f64 {
-        match self.kind {
-            LayerKind::Linear => { sigmoid(x) },
-            LayerKind::Identity => { unreachable!() }
-        }
-    }
-
-    pub fn act_fun_derivative(&self, x: f64) -> f64 {
-        match self.kind {
-            LayerKind::Linear => { sigmoid(x)*(1.-sigmoid(x)) },
-            LayerKind::Identity => { unreachable!() }
-        }
-    }
-
-    pub fn run(&mut self, previous_results: &[f64]) -> &[f64] {
-        for i in 0..self.neurons.len() {
-            self.neurons_results[i] = vector_sum(previous_results, &self.neurons[i].weights, self.neurons[i].bias);
-            self.layer_results[i] = self.act_fun(self.neurons_results[i]);
-        }
-        &self.layer_results
-    }
 }

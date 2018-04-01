@@ -1,98 +1,131 @@
+use std::marker;
 use layer::Layer;
-use layer::LayerKind;
+use cost::CostFunction;
 
-// a single cost for the whole network, maybe move this to a layer basis
-#[derive(Debug)]
-pub enum CostFunction {
-    Quadratic
+pub struct Brain<C: CostFunction, L: Layer + Sized> {
+    input_size: usize,
+    pub layers: Vec<L>,
+    // variables used for backpropagation (everything is already allocated, so it ought to be
+    // faster, right ?)
+    pub tmp_layers: Vec<L>,
+    pub deltas: Vec<Vec<f64>>,
+    pub learn_rate: f64,
+    // I really really *enjoy* the feeling of using dark magic !
+    _marker_cost: marker::PhantomData<C>
 }
 
-#[derive(Debug)]
-pub struct Brain {
-    cost: CostFunction,
-    pub layers: Vec<Layer>,
-    pub learn_rate: f64
-}
-
-impl Brain {
-    pub fn new(cost: CostFunction, input_size: usize) -> Brain {
+impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
+    pub fn new(input_size: usize) -> Self {
         Brain {
-            cost,
-            layers: vec![Layer::new(LayerKind::Identity, input_size, input_size)],
-            learn_rate: 2.
+            input_size,
+            layers: Vec::new(),
+            tmp_layers: Vec::new(),
+            deltas: Vec::new(),
+            learn_rate: 2.,
+            _marker_cost: marker::PhantomData
         }
     }
     
-    pub fn add_layer(&mut self, kind: LayerKind, output_size: usize) {
-        let input_size = self.layers[self.layers.len()-1].size();
-        self.layers.push(Layer::new(kind, input_size, output_size));
+    pub fn add_layer(&mut self, output_size: usize) {
+        let input_size =
+            if self.layers.is_empty() {
+                self.input_size
+            } else {
+                self.layers[self.layers.len()-1].size()
+            };
+        let new_layer = L::new(input_size, output_size);
+        self.tmp_layers.push(new_layer.clone());
+
+        self.layers.push(new_layer);
+        self.deltas.push(vec![0.; output_size]);
     }
 
-    pub fn run(&mut self, data: &[f64]) -> Result<&[f64], &str> {
-        if data.len() != self.layers[0].size() {
+    pub fn forward(&mut self, data: &[f64]) -> Result<(), &'static str> {
+        if data.len() != self.input_size {
             return Err("Wrong input data size !");
         }
-        self.layers[0].layer_results.copy_from_slice(data);
-        // Per the current implementation, we do not require the first layer to hold any value,
-        // it's thus useless right now
-        self.layers.iter_mut().skip(1).fold(data, |acc, layer| {
-            layer.run(acc)
-        });
-        Ok(&self.layers[self.layers.len()-1].layer_results)
+        self.layers.iter_mut()
+            .fold(data, |out, layer| layer.forward(out));
+        Ok(())
     }
 
-    pub fn cost(&mut self, data: &[f64], expected_result: &[f64]) -> f64 {
-        self.run(data);
-        let mut cost: f64 = 0.;
-        let res = &self.layers[self.layers.len()-1].layer_results;
-        for i in 0..res.len() {
-            cost += (res[i] - expected_result[i]).powi(2);
-        }
-        1./2. * cost
-    }
-
-    pub fn backpropagation(&mut self, data: &[&[f64]], expected_result: &[&[f64]]) {
-        let dataset_size = data.len();
-        assert_eq!(dataset_size, expected_result.len());
-
-        let mut delta: Vec<Vec<f64>> = Vec::with_capacity(self.layers.len());
-        for layer in (1..self.layers.len()).rev() {
-            delta.push(Vec::with_capacity(self.layers[layer].neurons.len()));
-        }
-
-        for e in 0..dataset_size {
-            delta.clear();
-            self.run(data[e]);
-            for layer in (1..self.layers.len()).rev() {
-                let mut delta_layer = Vec::with_capacity(self.layers[layer].neurons.len());
-                for neuron in 0..self.layers[layer].neurons.len() {
-                    delta_layer.push(
-                        if layer == self.layers.len()-1 {
-                            // compute ΔC
-                            match self.cost {
-                                CostFunction::Quadratic => {
-                                   self.layers[layer].act_fun_derivative(self.layers[layer].neurons_results[neuron])*(self.layers[layer].layer_results[neuron]-expected_result[e][neuron])
-                                }
-                            }
-                        } else {
-                            let mut tmp = 0.;
-                            for next_neuron in 0..self.layers[layer+1].neurons.len() {
-                                tmp += delta[layer+1][next_neuron] * self.layers[layer+1].neurons[next_neuron].weights[neuron];
-                            }
-                            tmp * self.layers[layer].act_fun_derivative(self.layers[layer].neurons_results[neuron])
-                    });
+    pub fn backpropagation(&mut self, data_arr: &[&[f64]], expected_result_arr: &[&[f64]]) -> Result<(), &str> {
+        // -----------INIT TEMPORARY VALUES TO 0----------------
+        self.tmp_layers.iter_mut().fold(self.input_size,
+            |input_size, ref mut layer| {
+                for i in 0..layer.size() {
+                    layer.set_bias(i, 0.);
+                    for k in 0..input_size {
+                        layer.set_weight(k, i, 0.);
+                    }
                 }
-                // TODO: get rid of this mess
-                delta.push(delta_layer);
+                layer.size()
+        });
+
+        let batch_size = data_arr.len();
+        for idx in 0..batch_size {
+            let data = &data_arr[idx];
+            let expected_result = &expected_result_arr[idx];
+
+            self.forward(data)?;
+
+            let mut index = self.layers.len() - 1;
+            let cur_layer = &self.layers[index];
+
+            // -------------COMPUTE DELTAS-----------------
+            // last layer
+            for neuron in 0..cur_layer.size() {
+                self.deltas[index][neuron] =
+                    C::cost_derivative(cur_layer.get_outputs(), expected_result, neuron)
+                    * L::act_fun_derivative(cur_layer.get_potentials()[neuron]);
+            }
+
+            while index > 0 {
+                index -= 1;
+                let cur_layer = &self.layers[index];
+                let next_layer = &self.layers[index+1];
+                for neuron in 0..cur_layer.size() {
+                    let mut sum = 0.;
+                    for next in 0..next_layer.size() {
+                        sum += next_layer.get_weight(neuron, next) * self.deltas[index+1][next];
+                    }
+                    self.deltas[index][neuron] =
+                        sum * L::act_fun_derivative(cur_layer.get_potentials()[neuron]);
+                }
+            }
+
+            // ------------GENERATE TEMPORARY WEIGHTS AND BIASES-----------------
+            for layer in (0..self.tmp_layers.len()).rev() {
+                for neuron in 0..self.tmp_layers[layer].size() {
+                    let previous_layer_outputs =
+                        if layer == 0 {
+                            data
+                        } else {
+                            self.layers[layer-1].get_outputs()
+                        };
+                    let mut new_layer = &mut self.tmp_layers[layer];
+                    new_layer.add_bias(neuron, -self.learn_rate * self.deltas[layer][neuron]);
+                    for i in 0..previous_layer_outputs.len() {
+                        new_layer.add_weight(i, neuron, self.deltas[layer][neuron]*previous_layer_outputs[i]);
+                    }
+                }
             }
         }
-        for layer in (1..self.layers.len()).rev() {
-            for neuron in 0..self.layers[layer].neurons.len() {
-                for wk in 0..self.layers[layer].neurons[neuron].weights.len() {
-                    self.layers[layer].neurons[neuron].weights[wk] -= self.learn_rate/(dataset_size as f64) * delta[layer][neuron] * self.layers[layer-1].layer_results[wk];
+
+        // ------------UPDATE WEIGHTS AND BIASES-----------------
+        self.layers.iter_mut()
+            .zip(self.tmp_layers.iter())
+            .fold(self.input_size, |input_size, (ref mut layer, ref tmp_layer)| {
+                for i in 0..layer.size() {
+                    layer.set_bias(i, tmp_layer.get_bias(i));
+                    for k in 0..input_size {
+                        layer.set_weight(k, i, tmp_layer.get_weight(k, i));
+                    }
                 }
-                self.layers[layer].neurons[neuron].bias -= self.learn_rate/(dataset_size as f64) * delta[layer][neuron];
-        }
+                layer.size()
+        });
+
+        // Wow ! Everything went fine ;)
+        Ok(())
     }
-}
 }
