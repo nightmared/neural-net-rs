@@ -1,6 +1,7 @@
 use std::marker;
 use layer::Layer;
 use cost::CostFunction;
+use std::fmt::Debug;
 
 pub struct Brain<C: CostFunction, L: Layer + Sized> {
     input_size: usize,
@@ -14,18 +15,22 @@ pub struct Brain<C: CostFunction, L: Layer + Sized> {
     _marker_cost: marker::PhantomData<C>
 }
 
-impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
+impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
     pub fn new(input_size: usize) -> Self {
         Brain {
             input_size,
             layers: Vec::new(),
             tmp_layers: Vec::new(),
             deltas: Vec::new(),
-            learn_rate: 2.,
+            learn_rate: 0.5,
             _marker_cost: marker::PhantomData
         }
     }
-    
+
+    pub fn set_learn_rate(&mut self, rate: f64) {
+        self.learn_rate = rate;
+    }
+
     pub fn add_layer(&mut self, output_size: usize) {
         let input_size =
             if self.layers.is_empty() {
@@ -49,7 +54,10 @@ impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
         Ok(())
     }
 
-    pub fn backpropagation(&mut self, data_arr: &[&[f64]], expected_result_arr: &[&[f64]]) -> Result<(), &str> {
+    pub fn backpropagation(&mut self, data_arr: &[Vec<f64>], expected_result_arr: &[Vec<f64>]) -> Result<(), &str> {
+        if data_arr.len() != expected_result_arr.len() {
+            return Err("Wrong data size");
+        }
         // -----------INIT TEMPORARY VALUES TO 0----------------
         self.tmp_layers.iter_mut().fold(self.input_size,
             |input_size, ref mut layer| {
@@ -63,7 +71,11 @@ impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
         });
 
         let batch_size = data_arr.len();
+        let batch_learn_rate = -self.learn_rate/(batch_size as f64);
         for idx in 0..batch_size {
+            if idx % 100 == 0 {
+                println!("{}/{}", idx, batch_size);
+            }
             let data = &data_arr[idx];
             let expected_result = &expected_result_arr[idx];
 
@@ -96,15 +108,15 @@ impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
 
             // ------------GENERATE TEMPORARY WEIGHTS AND BIASES-----------------
             for layer in (0..self.tmp_layers.len()).rev() {
-                for neuron in 0..self.tmp_layers[layer].size() {
+                let mut new_layer = &mut self.tmp_layers[layer];
+                for neuron in 0..new_layer.size() {
                     let previous_layer_outputs =
                         if layer == 0 {
                             data
                         } else {
                             self.layers[layer-1].get_outputs()
                         };
-                    let mut new_layer = &mut self.tmp_layers[layer];
-                    new_layer.add_bias(neuron, -self.learn_rate * self.deltas[layer][neuron]);
+                    new_layer.add_bias(neuron, self.deltas[layer][neuron]);
                     for i in 0..previous_layer_outputs.len() {
                         new_layer.add_weight(i, neuron, self.deltas[layer][neuron]*previous_layer_outputs[i]);
                     }
@@ -117,9 +129,9 @@ impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
             .zip(self.tmp_layers.iter())
             .fold(self.input_size, |input_size, (ref mut layer, ref tmp_layer)| {
                 for i in 0..layer.size() {
-                    layer.set_bias(i, tmp_layer.get_bias(i));
+                    layer.add_bias(i, batch_learn_rate * tmp_layer.get_bias(i));
                     for k in 0..input_size {
-                        layer.set_weight(k, i, tmp_layer.get_weight(k, i));
+                        layer.add_weight(k, i, batch_learn_rate * tmp_layer.get_weight(k, i));
                     }
                 }
                 layer.size()
@@ -127,5 +139,9 @@ impl<C: CostFunction, L: Layer + Sized + Clone> Brain<C, L> {
 
         // Wow ! Everything went fine ;)
         Ok(())
+    }
+    pub fn cost(&mut self, inputs: &[f64], expected_results: &[f64]) -> Result<f64, &str> {
+        self.forward(inputs)?;
+        Ok(C::cost(self.layers[self.layers.len()-1].get_outputs(), expected_results))
     }
 }

@@ -18,9 +18,10 @@ pub trait Layer {
 
 #[derive(Debug, Clone)]
 pub struct Linear {
+    pub input_size: usize,
     pub length: usize,
     // Matrix of all the weights
-    // wij = weights[i*self.length+j]
+    // wij = weights[i*self.input_size+j]
     pub weights: Vec<f64>,
     pub bias: Vec<f64>,
     // temporary storage for results of the sum Σw*x+b
@@ -43,6 +44,7 @@ impl Layer for Linear {
             bias[i] = rng.gen::<f64>() - 0.5;
         }
         Linear {
+            input_size,
             length: output_size,
             weights,
             bias,
@@ -63,7 +65,7 @@ impl Layer for Linear {
     }
     fn forward(&mut self, previous_layer: &[f64]) -> &[f64] {
         for i in 0..self.length {
-            self.potentials[i] = vector_dot(previous_layer, &self.weights[i*self.length..(i+1)*self.length], self.bias[i]);
+            self.potentials[i] = vector_dot(previous_layer, &self.weights[i*self.input_size..(i+1)*self.input_size], self.bias[i]);
             self.outputs[i] = Self::act_fun(self.potentials[i]);
         }
         &self.outputs
@@ -78,7 +80,7 @@ impl Layer for Linear {
     }
     #[inline]
     fn get_weight(&self, from: usize, to: usize) -> f64 {
-       self.weights[to*self.length+from] 
+       self.weights[to*self.input_size+from] 
     }
     #[inline]
     fn get_bias(&self, neuron: usize) -> f64 {
@@ -86,7 +88,7 @@ impl Layer for Linear {
     }
     #[inline]
     fn set_weight(&mut self, from: usize, to: usize, val: f64) {
-       self.weights[to*self.length+from] = val;
+       self.weights[to*self.input_size+from] = val;
     }
     #[inline]
     fn set_bias(&mut self, neuron: usize, val: f64) {
@@ -94,7 +96,7 @@ impl Layer for Linear {
     }
     #[inline]
     fn add_weight(&mut self, from: usize, to: usize, val: f64) {
-       self.weights[to*self.length+from] += val;
+       self.weights[to*self.input_size+from] += val;
     }
     #[inline]
     fn add_bias(&mut self, neuron: usize, val: f64) {
@@ -105,7 +107,9 @@ impl Layer for Linear {
 
 #[inline]
 fn vector_dot(previous_layer: &[f64], weights: &[f64], bias: f64) -> f64 {
-    previous_layer.iter()
-        .zip(weights.iter())
-        .fold(bias, |acc, (&v, &w)| acc + v*w)
+    let mut sum = 0.;
+    for i in 0..previous_layer.len() {
+        sum += previous_layer[i] * weights[i];
+    }
+    sum + bias
 }
