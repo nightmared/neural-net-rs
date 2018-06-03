@@ -32,8 +32,8 @@ fn main() {
     let context = glutin::ContextBuilder::new();
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
     let _ = unsafe { gl_window.make_current() };
-	let mut gui = gui::Gui::new(&gl_window);
 	let idx = rng.gen::<usize>()%60000;
+	let mut gui = gui::Gui::new(&gl_window, train_mnist.images[idx].as_slice());
     events_loop.run_forever(|event| {
         match event {
             glutin::Event::WindowEvent { event, .. } => match event {

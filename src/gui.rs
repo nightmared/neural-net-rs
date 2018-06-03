@@ -58,15 +58,19 @@ pub struct Gui {
 	tex: GLuint
 }
 
-static VERTEX_DATA: [f32; 28] = [
-	-0.5, -0.5, 1.0, 0.0, 0.0, 0.0, 0.0,
-	0.0, 0.5, 0.0, 1.0, 0.0, 1.0, 0.0,
-	0.5, -0.5, 0.0, 0.0, 1.0, 1.0, 1.0,
-	-0.5, -0.5, 1.0, 1.0, 1.0, 0.0, 1.0
+static VERTEX_DATA: [f32; 16] = [
+	-0.5, -0.5, 0.0, 0.0,
+	0.0, 0.5, 1.0, 0.0,
+	0.5, -0.5, 1.0, 1.0,
+	-0.5, -0.5, 0.0, 1.0
+];
+
+static elements: [GLuint; 6] = [
+    0, 1, 2, 2, 3, 0
 ];
 
 impl Gui {
-    pub fn new(gl_window: &glutin::GlContext) -> Gui {
+    pub fn new(gl_window: &glutin::GlContext, img: &[f64]) -> Gui {
 		gl::load_with(|ptr| gl_window.get_proc_address(ptr) as *const _);
         let shader_prog = new_prog("./src/shaders/vertex.shader", "./src/shaders/fragment.shader");
 		let tex = unsafe {
@@ -80,20 +84,25 @@ impl Gui {
             gl::BindVertexArray(vao);
 
             let position_vertex = gl::GetAttribLocation(shader_prog, b"position\0".as_ptr() as *const _) as u32;
-            gl::VertexAttribPointer(position_vertex, 2, gl::FLOAT, gl::FALSE, 7 * mem::size_of::<f32>() as i32, ptr::null());
             gl::EnableVertexAttribArray(position_vertex);
+            gl::VertexAttribPointer(position_vertex, 2, gl::FLOAT, gl::FALSE, 5 * mem::size_of::<f32>() as i32, ptr::null());
 
 			let position_tex = gl::GetAttribLocation(shader_prog, b"texcoord\0".as_ptr() as *const _) as u32;
-			gl::VertexAttribPointer(position_tex, 2, gl::FLOAT, gl::FALSE, 7 * mem::size_of::<f32>() as i32, (5 * mem::size_of::<f32>()) as *const _);
 			gl::EnableVertexAttribArray(position_tex);
+			gl::VertexAttribPointer(position_tex, 2, gl::FLOAT, gl::FALSE, 5 * mem::size_of::<f32>() as i32, (2 * mem::size_of::<f32>()) as *const _);
 
-			let mut ebo = mem::uninitialised();
+			let mut ebo = mem::uninitialized();
             gl::GenBuffers(1, &mut ebo);
+            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+            gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (elements.len() * mem::size_of::<f32>()) as gl::types::GLsizeiptr,
+                elements.as_ptr() as *const _, gl::STATIC_DRAW);
 
 			let mut tex = mem::uninitialized();
 			gl::GenTextures(1, &mut tex);
+            gl::ActiveTexture(gl::TEXTURE0);
 			gl::BindTexture(gl::TEXTURE_2D, tex);
 			gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
+			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, 28, 28, 0, gl::RED_INTEGER, gl::UNSIGNED_BYTE, img as *const [f64] as *const c_void);
 			tex
 		};
         Gui { tex, prog: shader_prog }
@@ -103,8 +112,7 @@ impl Gui {
         unsafe {
             gl::ClearColor(0.0, 0.0, 1.0, 1.0);
 			gl::Clear(gl::COLOR_BUFFER_BIT);
-			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, 28, 28, 0, gl::RED_INTEGER, gl::UNSIGNED_BYTE, img as *const [f64] as *const c_void);
-			gl::DrawArrays(gl::TRIANGLES, 0, 4);
+			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const _);
         }
     }
 }
