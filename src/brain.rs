@@ -1,29 +1,29 @@
-use std::marker;
-use layer::Layer;
-use cost::CostFunction;
-use std::fmt::Debug;
+use std::fs::File;
+use std::io::{Write, Read};
+use std::{io, mem};
+use layer::Linear;
 
-pub struct Brain<C: CostFunction, L: Layer + Sized> {
+use layer;
+use cost;
+
+pub struct Brain {
     input_size: usize,
-    pub layers: Vec<L>,
+    pub layers: Vec<layer::Linear>,
     // variables used for backpropagation (everything is already allocated, so it ought to be
     // faster, right ?)
-    pub tmp_layers: Vec<L>,
+    pub tmp_layers: Vec<layer::Linear>,
     pub deltas: Vec<Vec<f64>>,
     pub learn_rate: f64,
-    // I really really *enjoy* the feeling of using dark magic !
-    _marker_cost: marker::PhantomData<C>
 }
 
-impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
+impl Brain {
     pub fn new(input_size: usize) -> Self {
         Brain {
             input_size,
             layers: Vec::new(),
             tmp_layers: Vec::new(),
             deltas: Vec::new(),
-            learn_rate: 0.5,
-            _marker_cost: marker::PhantomData
+            learn_rate: 2.0
         }
     }
 
@@ -31,18 +31,33 @@ impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
         self.learn_rate = rate;
     }
 
+    fn get_last_layer_input_size(&self) -> usize {
+        if self.layers.is_empty() {
+            self.input_size
+        } else {
+            self.layers[self.layers.len()-1].size()
+        }
+    }
+
     pub fn add_layer(&mut self, output_size: usize) {
-        let input_size =
-            if self.layers.is_empty() {
-                self.input_size
-            } else {
-                self.layers[self.layers.len()-1].size()
-            };
-        let new_layer = L::new(input_size, output_size);
+        let input_size = self.get_last_layer_input_size();
+        let new_layer = layer::Linear::new(input_size, output_size);
         self.tmp_layers.push(new_layer.clone());
 
         self.layers.push(new_layer);
         self.deltas.push(vec![0.; output_size]);
+    }
+
+    pub fn add_existing_layer(&mut self, layer: layer::Linear) -> Result<(), ()> {
+        let input_size = self.get_last_layer_input_size();
+        if layer.input_size == input_size {
+            self.tmp_layers.push(layer.clone());
+            self.deltas.push(vec![0.; layer.length]);
+            self.layers.push(layer);
+            Ok(())
+        } else {
+            Err(())
+        }
     }
 
     pub fn forward(&mut self, data: &[f64]) -> Result<(), &'static str> {
@@ -73,9 +88,6 @@ impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
         let batch_size = data_arr.len();
         let batch_learn_rate = -self.learn_rate/(batch_size as f64);
         for idx in 0..batch_size {
-            if idx % 100 == 0 {
-                println!("{}/{}", idx, batch_size);
-            }
             let data = &data_arr[idx];
             let expected_result = &expected_result_arr[idx];
 
@@ -88,8 +100,8 @@ impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
             // last layer
             for neuron in 0..cur_layer.size() {
                 self.deltas[index][neuron] =
-                    C::cost_derivative(cur_layer.get_outputs(), expected_result, neuron)
-                    * L::act_fun_derivative(cur_layer.get_potentials()[neuron]);
+                    cost::cost_derivative(cur_layer.get_outputs(), expected_result, neuron)
+                    * layer::act_fun_derivative(cur_layer.get_potentials()[neuron]);
             }
 
             while index > 0 {
@@ -102,7 +114,7 @@ impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
                         sum += next_layer.get_weight(neuron, next) * self.deltas[index+1][next];
                     }
                     self.deltas[index][neuron] =
-                        sum * L::act_fun_derivative(cur_layer.get_potentials()[neuron]);
+                        sum * layer::act_fun_derivative(cur_layer.get_potentials()[neuron]);
                 }
             }
 
@@ -137,11 +149,84 @@ impl<C: CostFunction, L: Layer + Sized + Debug + Clone> Brain<C, L> {
                 layer.size()
         });
 
-        // Wow ! Everything went fine ;)
+        // Wow ! Everything went fine ;) (or not !)
         Ok(())
     }
     pub fn cost(&mut self, inputs: &[f64], expected_results: &[f64]) -> Result<f64, &str> {
         self.forward(inputs)?;
-        Ok(C::cost(self.layers[self.layers.len()-1].get_outputs(), expected_results))
+        Ok(cost::cost(self.layers[self.layers.len()-1].get_outputs(), expected_results))
     }
+    pub fn get_outputs(&self) -> &[f64] {
+        &self.layers[self.layers.len()-1].get_outputs()
+    }
+    pub fn save(&self, mut dir: File) -> Result<(), io::Error> {
+        write_byte(&mut dir, self.layers.len())?;
+        write_byte(&mut dir, unsafe{mem::transmute(self.learn_rate)})?;
+        for i in 0..self.layers.len() {
+            write_byte(&mut dir, self.layers[i].input_size)?;
+            write_byte(&mut dir, self.layers[i].length)?;
+            write_arr(&mut dir, &self.layers[i].weights)?;
+            write_arr(&mut dir, &self.layers[i].bias)?;
+        }
+        dir.flush()?;
+        Ok(())
+    }
+    pub fn load_from_file(mut dir: File) -> Result<Self, io::Error> {
+        let layers_num = read_byte(&mut dir)?;
+        let learn_rate = read_byte(&mut dir)?;
+        let mut b = Brain {
+            input_size: 0,
+            layers: Vec::new(),
+            tmp_layers: Vec::new(),
+            deltas: Vec::new(),
+            learn_rate: unsafe{mem::transmute(learn_rate)}
+        };
+        for i in 0..layers_num {
+            let in_size = read_byte(&mut dir)?;
+            if i == 0 {
+                b.input_size = in_size;
+            }
+            let out_size = read_byte(&mut dir)?;
+            let mut weights = read_arr(&mut dir, in_size*out_size)?;
+            let mut bias = read_arr(&mut dir, out_size)?;
+            let mut layer = Linear::new(in_size, out_size);
+            layer.weights = weights;
+            layer.bias = bias;
+            b.add_existing_layer(layer).unwrap();
+        }
+        Ok(b)
+    }
+}
+
+// Ugh, let's not talk to anyone about all this, right ?
+// Also: do not ever, ever, EVER call this function with a value whose size is not 8 bytes (beware
+// of 32 bit platforms !)...
+fn write_byte(fd: &mut File, val: usize) -> Result<(), io::Error> {
+    fd.write_all(unsafe { mem::transmute::<_, &[u8; 8]>(&[val])})?;
+    Ok(())
+}
+
+fn write_arr(fd: &mut File, arr: &[f64]) -> Result<(), io::Error> {
+    let mut new_arr = Vec::with_capacity(arr.len()*8);
+    for e in arr {
+        new_arr.extend_from_slice(unsafe { mem::transmute::<&f64, &[u8; 8]>(e)});
+    }
+    fd.write_all(new_arr.as_slice())?;
+    Ok(())
+}
+
+fn read_byte(fd: &mut File) -> Result<usize, io::Error> {
+    let mut buffer = [0; 8];
+    fd.read_exact(&mut buffer)?;
+    Ok(unsafe { mem::transmute::<_, usize>(buffer) })
+}
+
+fn read_arr(fd: &mut File, size: usize) -> Result<Vec<f64>, io::Error> {
+    let mut data: Vec<u8> = vec![0; size*8];
+    fd.read_exact(data.as_mut_slice())?;
+    let mut vec = Vec::with_capacity(size);
+    for i in 0..size {
+        vec.push(unsafe { mem::transmute::<&[u8], &[f64]>(&data[i*8..(i+1)*8])}[0]);
+    }
+    Ok(vec)
 }

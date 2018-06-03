@@ -1,10 +1,7 @@
-use std::fmt::Debug;
 use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 use brain::Brain;
-use cost::CostFunction;
-use layer::Layer;
 
 use rand::{thread_rng, Rng};
 
@@ -69,15 +66,30 @@ impl Mnist {
         })
     }
 
-    pub fn measure_error<C, L>(&self, network: &mut Brain<C, L>) -> f64
-    where C: CostFunction, L: Layer + Sized + Debug + Clone {
+    pub fn measure_error(&self, network: &mut Brain) -> f64 {
         let mut rng = thread_rng();
         // average errors on 100 runs
         let mut sum = 0.;
-        for _ in 0..100 {
+        for _ in 0..1000 {
             let index: usize = rng.gen::<usize>()%self.number;
-            sum += network.cost(&self.images[index], &self.results[index]).unwrap();
+            network.forward(&self.images[index]).unwrap();
+            let mut expected_val = 0;
+            for i in 0..self.results[index].len() {
+                if self.results[index][i] > 0.5 {
+                    expected_val = i;
+                }
+            }
+            let mut val = 0;
+            let outputs = network.get_outputs();
+            for i in 1..outputs.len() {
+                if outputs[i] > outputs[val] {
+                    val = i;
+                }
+            }
+            if val == expected_val {
+                sum += 1.;
+            }
         }
-        sum / 100.
+        1. - sum / 1000.
     }
 }
