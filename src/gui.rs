@@ -52,44 +52,53 @@ fn new_prog(path_vs: &str, path_fs: &str) -> GLuint {
 	program
 }
 
-
 pub struct Gui {
 	prog: GLuint,
-	tex: GLuint
+	tex: GLuint,
+    img0: Vec<u32>,
+    img1: Vec<u32>,
+    img_len: i32
 }
 
-static VERTEX_DATA: [f32; 16] = [
-	-0.5, -0.5, 0.0, 0.0,
-	0.0, 0.5, 1.0, 0.0,
-	0.5, -0.5, 1.0, 1.0,
-	-0.5, -0.5, 0.0, 1.0
+static VERTEX_DATA: [f32; 32] = [
+	0., 0., 1.0, 0.0,
+	0., -1., 1.0, 1.0,
+	-1., -1., 0.0, 1.0,
+	-1., 0., 0.0, 0.0,
+	1., 0., 1.0, 0.0,
+	1., -1., 1.0, 1.0,
+	0., -1., 0.0, 1.0,
+	0., 0., 0.0, 0.0,
 ];
 
-static elements: [GLuint; 6] = [
-    0, 1, 2, 2, 3, 0
+static elements: [GLuint; 12] = [
+    0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4
 ];
 
 impl Gui {
-    pub fn new(gl_window: &glutin::GlContext, img: &[f64]) -> Gui {
+    pub fn new(gl_window: &glutin::GlContext,  img_len: i32) -> Gui {
+        let tmp = vec![255 as u32; (img_len*img_len) as usize];
 		gl::load_with(|ptr| gl_window.get_proc_address(ptr) as *const _);
         let shader_prog = new_prog("./src/shaders/vertex.shader", "./src/shaders/fragment.shader");
 		let tex = unsafe {
+            gl::BindFragDataLocation(shader_prog, 0, b"outColor\0".as_ptr() as *const _);
+			let mut vao = mem::uninitialized();
+            gl::GenVertexArrays(1, &mut vao);
+            gl::BindVertexArray(vao);
+
 			let mut vbo = mem::uninitialized();
 			gl::GenBuffers(1, &mut vbo);
 			gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
 			gl::BufferData(gl::ARRAY_BUFFER, (VERTEX_DATA.len() * mem::size_of::<f32>()) as gl::types::GLsizeiptr,
 				VERTEX_DATA.as_ptr() as *const _, gl::STATIC_DRAW);
-			let mut vao = mem::uninitialized();
-            gl::GenVertexArrays(1, &mut vao);
-            gl::BindVertexArray(vao);
 
             let position_vertex = gl::GetAttribLocation(shader_prog, b"position\0".as_ptr() as *const _) as u32;
             gl::EnableVertexAttribArray(position_vertex);
-            gl::VertexAttribPointer(position_vertex, 2, gl::FLOAT, gl::FALSE, 5 * mem::size_of::<f32>() as i32, ptr::null());
+            gl::VertexAttribPointer(position_vertex, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, ptr::null());
 
 			let position_tex = gl::GetAttribLocation(shader_prog, b"texcoord\0".as_ptr() as *const _) as u32;
 			gl::EnableVertexAttribArray(position_tex);
-			gl::VertexAttribPointer(position_tex, 2, gl::FLOAT, gl::FALSE, 5 * mem::size_of::<f32>() as i32, (2 * mem::size_of::<f32>()) as *const _);
+			gl::VertexAttribPointer(position_tex, 2, gl::FLOAT, gl::FALSE, 4 * mem::size_of::<f32>() as i32, (2 * mem::size_of::<f32>()) as *const _);
 
 			let mut ebo = mem::uninitialized();
             gl::GenBuffers(1, &mut ebo);
@@ -97,22 +106,37 @@ impl Gui {
             gl::BufferData(gl::ELEMENT_ARRAY_BUFFER, (elements.len() * mem::size_of::<f32>()) as gl::types::GLsizeiptr,
                 elements.as_ptr() as *const _, gl::STATIC_DRAW);
 
-			let mut tex = mem::uninitialized();
-			gl::GenTextures(1, &mut tex);
-            gl::ActiveTexture(gl::TEXTURE0);
+			let mut tex: GLuint = mem::uninitialized();
+			gl::GenTextures(1, &mut tex as *mut u32);
+
 			gl::BindTexture(gl::TEXTURE_2D, tex);
+			gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as i32);
 			gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as i32);
-			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RED as i32, 28, 28, 0, gl::RED_INTEGER, gl::UNSIGNED_BYTE, img as *const [f64] as *const c_void);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, img_len, img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, tmp.as_ptr() as *const c_void);
+            gl::Uniform1i(gl::GetUniformLocation(shader_prog, b"tex\0".as_ptr() as *const _), 0);
 			tex
 		};
-        Gui { tex, prog: shader_prog }
+        Gui { tex, prog: shader_prog, img0: tmp.clone(), img1: tmp, img_len }
     }
 
-    pub fn redraw(&mut self, img: &[f64]) {
+    pub fn update_img(&mut self, img: Vec<u32>, pos: usize) {
+            if pos == 0 {
+                self.img0 = img;
+            } else {
+                self.img1 = img;
+            }
+    }
+
+    pub fn redraw(&mut self) {
         unsafe {
             gl::ClearColor(0.0, 0.0, 1.0, 1.0);
 			gl::Clear(gl::COLOR_BUFFER_BIT);
+			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img0.as_ptr() as *const c_void);
 			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const _);
+			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img1.as_ptr() as *const c_void);
+			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 24 as *const _);
         }
     }
 }

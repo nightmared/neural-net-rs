@@ -28,25 +28,37 @@ fn main() {
     let mut rng = thread_rng();
 
     let mut events_loop = glutin::EventsLoop::new();
-    let window = glutin::WindowBuilder::new().with_title("TIPE");
+    let window = glutin::WindowBuilder::new()
+        .with_title("TIPE")
+        .with_always_on_top(true)
+        .with_dimensions(500, 500);
     let context = glutin::ContextBuilder::new();
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
     let _ = unsafe { gl_window.make_current() };
 	let idx = rng.gen::<usize>()%60000;
-	let mut gui = gui::Gui::new(&gl_window, train_mnist.images[idx].as_slice());
-    events_loop.run_forever(|event| {
-        match event {
-            glutin::Event::WindowEvent { event, .. } => match event {
-                glutin::WindowEvent::CloseRequested => return glutin::ControlFlow::Break,
-                glutin::WindowEvent::Resized(w, h) => gl_window.resize(w, h),
-                _ => ()
-            },
-            _ => (),
-        }
-		gui.redraw(train_mnist.images[idx].as_slice());
+	let mut gui = gui::Gui::new(&gl_window, 28);
+	let mut running = true;
+	while running {
+		events_loop.poll_events(|event| {
+			match event {
+				glutin::Event::WindowEvent { event, .. } => match event {
+					glutin::WindowEvent::CloseRequested => running = false,
+					glutin::WindowEvent::Resized(w, h) => gl_window.resize(w, h),
+					_ => ()
+				},
+				_ => (),
+			}
+		});
+		thread::sleep(time::Duration::from_millis(250));
+		let idx = rng.gen::<usize>()%60000;
+        let img: Vec<u32> = train_mnist.images[idx].iter().map(|&x| (x*256.) as u32 * 256*256*256+255).collect();
+		gui.update_img(img, 1);
+		let idx = rng.gen::<usize>()%60000;
+        let img: Vec<u32> = train_mnist.images[idx].iter().map(|&x| (x*256.) as u32 * 256*256*256+255).collect();
+		gui.update_img(img, 0);
+		gui.redraw();
         let _ = gl_window.swap_buffers();
-        glutin::ControlFlow::Continue
-    });
+    }
 
     println!("Error before training on train data: {}", train_mnist.measure_error(&mut brain));
     println!("Error before training on test data: {}", test_mnist.measure_error(&mut brain));
