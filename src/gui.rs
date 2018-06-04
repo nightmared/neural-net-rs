@@ -6,6 +6,10 @@ use std::ffi::CString;
 use std::os::raw::c_void;
 use std::ptr;
 use std::mem;
+use glutin::GlContext;
+use city::City;
+use brain::Brain;
+use rand::{Rng, ThreadRng};
 
 
 fn shader_cc(fname: &str, shader_type: GLenum) -> Result<GLuint, &'static str> {
@@ -61,14 +65,14 @@ pub struct Gui {
 }
 
 static VERTEX_DATA: [f32; 32] = [
-	0., 0., 1.0, 0.0,
+	0., 1., 1.0, 0.0,
 	0., -1., 1.0, 1.0,
 	-1., -1., 0.0, 1.0,
-	-1., 0., 0.0, 0.0,
-	1., 0., 1.0, 0.0,
+	-1., 1., 0.0, 0.0,
+	1., 1., 1.0, 0.0,
 	1., -1., 1.0, 1.0,
 	0., -1., 0.0, 1.0,
-	0., 0., 0.0, 0.0,
+	0., 1., 0.0, 0.0
 ];
 
 static elements: [GLuint; 12] = [
@@ -122,12 +126,29 @@ impl Gui {
     }
 
     pub fn update_img(&mut self, img: Vec<u32>, pos: usize) {
-            if pos == 0 {
-                self.img0 = img;
-            } else {
-                self.img1 = img;
-            }
+		if pos == 0 {
+			self.img0 = img;
+		} else {
+			self.img1 = img;
+		}
     }
+
+	pub fn draw_rectangle(&mut self, pos: usize, x: f64, y: f64, color: u32) {
+		let (mut x, mut y) = ((x*self.img_len as f64).floor() as usize, (y*self.img_len as f64).floor() as usize);
+		let mut img = if pos == 0 {
+			&mut self.img0
+		} else {
+			&mut self.img1
+		};
+        if (x+1)*self.img_len as usize+y+1 >= (self.img_len*self.img_len) as usize {
+            x = self.img_len as usize-2;
+            y = self.img_len as usize-2;
+        }
+		img[x*self.img_len as usize+y] = (color<<8)+255;
+		img[(x+1)*self.img_len as usize+y] = (color<<8)+255;
+		img[x*self.img_len as usize+y+1] = (color<<8)+255;
+		img[(x+1)*self.img_len as usize+y+1] = (color<<8)+255;
+	}
 
     pub fn redraw(&mut self) {
         unsafe {
@@ -138,5 +159,52 @@ impl Gui {
 			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img1.as_ptr() as *const c_void);
 			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 24 as *const _);
         }
+    }
+}
+
+fn display_img(brain: &mut Brain, gui: &mut Gui, dataset: &City, pos: usize, idx: usize) {
+    let mut img: Vec<u32> = dataset.images[idx].iter().map(|&x| { let y = (x*256.) as u32; (y<<24)+(y<<16)+(y<<8)+255}).collect();
+    gui.update_img(img.clone(), pos);
+    gui.draw_rectangle(pos, dataset.results[idx][0], dataset.results[idx][1], 255<<8);
+    brain.forward(&dataset.images[idx]);
+    let out = brain.get_outputs();
+    gui.draw_rectangle(pos, out[0], out[1], 255<<16);
+}
+
+pub fn show_gui(mut brain: &mut Brain, train: &City, test: &City, rng: &mut ThreadRng) {
+    let mut events_loop = glutin::EventsLoop::new();
+    let window = glutin::WindowBuilder::new()
+        .with_title("TIPE")
+        .with_always_on_top(true)
+        .with_dimensions(1000, 500);
+    let context = glutin::ContextBuilder::new();
+    let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
+    let _ = unsafe { gl_window.make_current() };
+	let mut gui = Gui::new(&gl_window, 128);
+	let mut running = true;
+	while running {
+		events_loop.poll_events(|event| {
+			match event {
+				glutin::Event::WindowEvent { event, .. } => match event {
+					glutin::WindowEvent::CloseRequested => running = false,
+					glutin::WindowEvent::Resized(w, h) => gl_window.resize(w, h),
+					glutin::WindowEvent::KeyboardInput { device_id, input } => {
+                        if input.state == glutin::ElementState::Pressed {
+                            if let Some(glutin::VirtualKeyCode::Numpad0) = input.virtual_keycode {
+                                let mut idx = rng.gen::<usize>()%train.number;
+                                display_img(&mut brain, &mut gui, &train, 0, idx);
+                            } else if let Some(glutin::VirtualKeyCode::Numpad1) = input.virtual_keycode {
+                                let mut idx = rng.gen::<usize>()%test.number;
+                                display_img(&mut brain, &mut gui, &test, 1, idx);
+                            }
+                       }
+                    },
+					_ => ()
+				},
+				_ => (),
+			}
+		});
+		gui.redraw();
+        let _ = gl_window.swap_buffers();
     }
 }

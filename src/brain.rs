@@ -1,7 +1,8 @@
 use std::fs::File;
-use std::io::{Write, Read};
+use std::io::Write;
 use std::{io, mem};
 use layer::Linear;
+use tools::*;
 
 use layer;
 use cost;
@@ -23,7 +24,7 @@ impl Brain {
             layers: Vec::new(),
             tmp_layers: Vec::new(),
             deltas: Vec::new(),
-            learn_rate: 2.0
+            learn_rate: 0.5
         }
     }
 
@@ -160,11 +161,11 @@ impl Brain {
         &self.layers[self.layers.len()-1].get_outputs()
     }
     pub fn save(&self, mut dir: File) -> Result<(), io::Error> {
-        write_byte(&mut dir, self.layers.len())?;
-        write_byte(&mut dir, unsafe{mem::transmute(self.learn_rate)})?;
+        write_dq(&mut dir, self.layers.len())?;
+        write_dq(&mut dir, unsafe{mem::transmute(self.learn_rate)})?;
         for i in 0..self.layers.len() {
-            write_byte(&mut dir, self.layers[i].input_size)?;
-            write_byte(&mut dir, self.layers[i].length)?;
+            write_dq(&mut dir, self.layers[i].input_size)?;
+            write_dq(&mut dir, self.layers[i].length)?;
             write_arr(&mut dir, &self.layers[i].weights)?;
             write_arr(&mut dir, &self.layers[i].bias)?;
         }
@@ -172,8 +173,8 @@ impl Brain {
         Ok(())
     }
     pub fn load_from_file(mut dir: File) -> Result<Self, io::Error> {
-        let layers_num = read_byte(&mut dir)?;
-        let learn_rate = read_byte(&mut dir)?;
+        let layers_num = read_dq(&mut dir)?;
+        let learn_rate = read_dq(&mut dir)?;
         let mut b = Brain {
             input_size: 0,
             layers: Vec::new(),
@@ -182,11 +183,11 @@ impl Brain {
             learn_rate: unsafe{mem::transmute(learn_rate)}
         };
         for i in 0..layers_num {
-            let in_size = read_byte(&mut dir)?;
+            let in_size = read_dq(&mut dir)?;
             if i == 0 {
                 b.input_size = in_size;
             }
-            let out_size = read_byte(&mut dir)?;
+            let out_size = read_dq(&mut dir)?;
             let mut weights = read_arr(&mut dir, in_size*out_size)?;
             let mut bias = read_arr(&mut dir, out_size)?;
             let mut layer = Linear::new(in_size, out_size);
@@ -196,37 +197,4 @@ impl Brain {
         }
         Ok(b)
     }
-}
-
-// Ugh, let's not talk to anyone about all this, right ?
-// Also: do not ever, ever, EVER call this function with a value whose size is not 8 bytes (beware
-// of 32 bit platforms !)...
-fn write_byte(fd: &mut File, val: usize) -> Result<(), io::Error> {
-    fd.write_all(unsafe { mem::transmute::<_, &[u8; 8]>(&[val])})?;
-    Ok(())
-}
-
-fn write_arr(fd: &mut File, arr: &[f64]) -> Result<(), io::Error> {
-    let mut new_arr = Vec::with_capacity(arr.len()*8);
-    for e in arr {
-        new_arr.extend_from_slice(unsafe { mem::transmute::<&f64, &[u8; 8]>(e)});
-    }
-    fd.write_all(new_arr.as_slice())?;
-    Ok(())
-}
-
-fn read_byte(fd: &mut File) -> Result<usize, io::Error> {
-    let mut buffer = [0; 8];
-    fd.read_exact(&mut buffer)?;
-    Ok(unsafe { mem::transmute::<_, usize>(buffer) })
-}
-
-fn read_arr(fd: &mut File, size: usize) -> Result<Vec<f64>, io::Error> {
-    let mut data: Vec<u8> = vec![0; size*8];
-    fd.read_exact(data.as_mut_slice())?;
-    let mut vec = Vec::with_capacity(size);
-    for i in 0..size {
-        vec.push(unsafe { mem::transmute::<&[u8], &[f64]>(&data[i*8..(i+1)*8])}[0]);
-    }
-    Ok(vec)
 }
