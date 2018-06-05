@@ -4,8 +4,7 @@ use std::fs::File;
 use std::io::Read;
 use std::ffi::CString;
 use std::os::raw::c_void;
-use std::ptr;
-use std::mem;
+use std::{ptr, time, mem, thread};
 use glutin::GlContext;
 use city::City;
 use brain::Brain;
@@ -61,7 +60,8 @@ pub struct Gui {
 	tex: GLuint,
     img0: Vec<u32>,
     img1: Vec<u32>,
-    img_len: i32
+    img_len: i32,
+    updated: bool
 }
 
 static VERTEX_DATA: [f32; 32] = [
@@ -122,7 +122,7 @@ impl Gui {
             gl::Uniform1i(gl::GetUniformLocation(shader_prog, b"tex\0".as_ptr() as *const _), 0);
 			tex
 		};
-        Gui { tex, prog: shader_prog, img0: tmp.clone(), img1: tmp, img_len }
+        Gui { tex, prog: shader_prog, img0: tmp.clone(), img1: tmp, img_len, updated: false }
     }
 
     pub fn update_img(&mut self, img: Vec<u32>, pos: usize) {
@@ -131,6 +131,7 @@ impl Gui {
 		} else {
 			self.img1 = img;
 		}
+        self.updated = true;
     }
 
 	pub fn draw_rectangle(&mut self, pos: usize, x: f64, y: f64, color: u32) {
@@ -152,12 +153,12 @@ impl Gui {
 
     pub fn redraw(&mut self) {
         unsafe {
-            gl::ClearColor(0.0, 0.0, 1.0, 1.0);
-			gl::Clear(gl::COLOR_BUFFER_BIT);
-			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img0.as_ptr() as *const c_void);
-			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const _);
-			gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img1.as_ptr() as *const c_void);
-			gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 24 as *const _);
+            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img0.as_ptr() as *const c_void);
+            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 0 as *const _);
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA as i32, self.img_len, self.img_len, 0, gl::RGBA, gl::UNSIGNED_INT_8_8_8_8, self.img1.as_ptr() as *const c_void);
+            gl::DrawElements(gl::TRIANGLES, 6, gl::UNSIGNED_INT, 24 as *const _);
         }
     }
 }
@@ -180,7 +181,7 @@ pub fn show_gui(mut brain: &mut Brain, train: &City, test: &City, rng: &mut Thre
     let context = glutin::ContextBuilder::new();
     let gl_window = glutin::GlWindow::new(window, context, &events_loop).unwrap();
     let _ = unsafe { gl_window.make_current() };
-	let mut gui = Gui::new(&gl_window, 128);
+	let mut gui = Gui::new(&gl_window, train.img_len as i32);
 	let mut running = true;
 	while running {
 		events_loop.poll_events(|event| {
@@ -204,7 +205,10 @@ pub fn show_gui(mut brain: &mut Brain, train: &City, test: &City, rng: &mut Thre
 				_ => (),
 			}
 		});
-		gui.redraw();
-        let _ = gl_window.swap_buffers();
+        if gui.updated {
+            gui.redraw();
+            let _ = gl_window.swap_buffers();
+        }
+        thread::sleep(time::Duration::from_millis(15));
     }
 }

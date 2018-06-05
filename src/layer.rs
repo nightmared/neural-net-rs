@@ -14,13 +14,16 @@ pub struct Linear {
     pub outputs: Vec<f64>
 }
 
+#[inline]
 pub fn act_fun(x: f64) -> f64 {
     // sigmoid
     1./(1.+f64::exp(-x))
 }
+
+#[inline]
 pub fn act_fun_derivative(x: f64) -> f64 {
     let exp = f64::exp(-x);
-    exp/(1. + exp)/(1. + exp)
+    exp/(1. + exp).powi(2)
 }
 
 impl Linear {
@@ -45,47 +48,57 @@ impl Linear {
             outputs
         }
     }
+    #[inline]
     pub fn size(&self) -> usize {
         self.length
     }
+    #[inline]
     pub fn forward(&mut self, previous_layer: &[f64]) -> &[f64] {
         for i in 0..self.length {
-            self.potentials[i] = vector_dot(previous_layer, &self.weights[i*self.input_size..(i+1)*self.input_size], self.bias[i]);
+            self.potentials[i] = vector_dot(previous_layer, &self.weights[i*self.input_size..(i+1)*self.input_size], self.input_size, self.bias[i]);
             self.outputs[i] = act_fun(self.potentials[i]);
         }
         &self.outputs
     }
+    #[inline]
     pub fn get_outputs(&self) -> &[f64] {
         &self.outputs
     }
+    #[inline]
     pub fn get_potentials(&self) -> &[f64] {
         &self.potentials
     }
+    #[inline]
     pub fn get_weight(&self, from: usize, to: usize) -> f64 {
        self.weights[to*self.input_size+from] 
     }
+    #[inline]
     pub fn get_bias(&self, neuron: usize) -> f64 {
         self.bias[neuron]
     }
+    #[inline]
     pub fn set_weight(&mut self, from: usize, to: usize, val: f64) {
        self.weights[to*self.input_size+from] = val;
     }
+    #[inline]
     pub fn set_bias(&mut self, neuron: usize, val: f64) {
         self.bias[neuron] = val;
     }
+    #[inline]
     pub fn add_weight(&mut self, from: usize, to: usize, val: f64) {
        self.weights[to*self.input_size+from] += val;
     }
+    #[inline]
     pub fn add_bias(&mut self, neuron: usize, val: f64) {
         self.bias[neuron] += val;
     }
 }
 
-fn vector_dot(previous_layer: &[f64], weights: &[f64], bias: f64) -> f64 {
-    let mut sum = 0.;
-    let len = previous_layer.len();
+#[inline]
+fn vector_dot(previous_layer: &[f64], weights: &[f64], len: usize, bias: f64) -> f64 {
+    let mut sum = bias;
     for i in 0..len {
         sum += previous_layer[i] * weights[i];
     }
-    sum + bias
+    sum
 }

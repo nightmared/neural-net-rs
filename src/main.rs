@@ -28,6 +28,8 @@ fn main() {
 	// create a test dataset of 50 images
 	let mut test = City {
 		number: 50,
+		img_len: train.img_len,
+		out_len: train.out_len,
 		images: vec![],
 		results: vec![]
 	};
@@ -38,31 +40,29 @@ fn main() {
 	train.number -= 50;
     let mut rng = thread_rng();
 
-    let mut brain = Brain::load_from_file(File::open("brain").unwrap()).unwrap();
-    //let mut brain = Brain::new(128*128);
-    //brain.add_layer(1500);
-    //brain.add_layer(2);
+    let mut brain = Brain::new(train.img_len*train.img_len);
+    brain.add_layer(1000);
+    brain.add_layer(100);
+    brain.add_layer(train.out_len);
 
-    //if test.measure_error(&mut brain) < 15. {
-        show_gui(&mut brain, &test, &train, &mut rng);
-    //}
+    //show_gui(&mut brain, &train, &test, &mut rng);
 
-    println!("Error before training on train data: {}", train.measure_error(&mut brain));
-    println!("Error before training on test data: {}", test.measure_error(&mut brain));
+    println!("Error before training on train data: {}", train.measure_error(&mut brain, &mut rng));
+    println!("Error before training on test data: {}", test.measure_error(&mut brain, &mut rng));
     let iters = 250;
-    let batch_size = 50;
-    let eps = 0.05;
+    let batch_size = 100;
+    let eps = 0.03;
     for i in 0..iters {
         // Select batch_size random elements
         let idx = rng.gen::<usize>()%(train.number-batch_size);
         brain.backpropagation(&train.images[idx..idx+batch_size], &train.results[idx..idx+batch_size]).unwrap();
-        let test_res = train.measure_error(&mut brain);
+        let test_res = train.measure_error(&mut brain, &mut rng);
         println!("{}/{} batches processed, error is {}", i+1, iters, test_res);
         if test_res < eps {
             break;
         }
     }
-    println!("Error after training on train data: {}", train.measure_error(&mut brain));
-    println!("Error after training on test data: {}", test.measure_error(&mut brain));
+    println!("Error after training on train data: {}", train.measure_error(&mut brain, &mut rng));
+    println!("Error after training on test data: {}", test.measure_error(&mut brain, &mut rng));
     brain.save(File::create("brain").unwrap()).unwrap();
 }
