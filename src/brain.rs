@@ -24,7 +24,7 @@ impl Brain {
             layers: Vec::new(),
             tmp_layers: Vec::new(),
             deltas: Vec::new(),
-            learn_rate: 0.15
+            learn_rate: 0.5
         }
     }
 

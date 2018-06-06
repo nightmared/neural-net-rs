@@ -23,6 +23,7 @@ impl City {
         let length = metadata(data)?.len() as usize;
         let mut number_tot = (length - header_length)/(in_len + out_len);
         let img_len = (in_len as f64/3.).sqrt() as usize;
+        println!("New city with in_len={},out_len={},num_images={},img_size={}", in_len, out_len, length, img_len);
 
         // finish reading the header
         let _ = read_4b(&mut fd)?;
