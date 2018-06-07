@@ -22,8 +22,7 @@ impl City {
         let out_len = read_2b(&mut fd)?;
         let length = metadata(data)?.len() as usize;
         let mut number_tot = (length - header_length)/(in_len + out_len);
-        let img_len = (in_len as f64/3.).sqrt() as usize;
-        println!("New city with in_len={},out_len={},num_images={},img_size={}", in_len, out_len, length, img_len);
+        let img_len = (in_len as f64).sqrt() as usize;
 
         // finish reading the header
         let _ = read_4b(&mut fd)?;
@@ -32,19 +31,17 @@ impl City {
         let mut images = Vec::with_capacity(number_tot);
         let mut results = Vec::with_capacity(number_tot);
         let mut number = 0;
-        for k in 0..number_tot {
-            let mut v = Vec::with_capacity(img_len*img_len);
-            let buffer = read_arr_u8(&mut fd, img_len*img_len*3)?;
-            for i in 0..(in_len/3) {
-                v.push((0.6*buffer[3*i] as f64 + 0.3*buffer[3*i+1] as f64 + 0.1*buffer[3*i+2] as f64)/256.);
-            }
+        for _ in 0..number_tot {
+            let buffer = read_arr_u8(&mut fd, img_len*img_len)?;
             let out = read_arr_u8(&mut fd, out_len)?;
             if out[2] as usize == img_len - 1 {
-                images.push(v);
-                results.push(vec![out[0] as f64/img_len as f64, out[1] as f64/img_len as f64]);
+                images.push(buffer.iter().map(|&x| x as f64/256.).collect());
+                results.push(vec![out[0] as f64/256., out[1] as f64/256.]);
                 number += 1;
             }
         }
+
+        println!("New city with in_len={},out_len={},num_images={},img_size={}", in_len, out_len, number_tot, img_len);
 
         Ok(City {
             number,
@@ -57,7 +54,7 @@ impl City {
 
     pub fn measure_error(&self, network: &mut Brain, rng: &mut ThreadRng) -> f64 {
         let mut sum = 0.;
-        for _ in 0..20 {
+        for _ in 0..50 {
             let index: usize = rng.gen::<usize>()%self.number;
             network.forward(&self.images[index]).unwrap();
             let outputs = network.get_outputs();
@@ -65,6 +62,6 @@ impl City {
                 sum += ((outputs[i] - self.results[index][i]).powi(2))/2.;
             }
         }
-        sum / 20.
+        sum / 50.
     }
 }

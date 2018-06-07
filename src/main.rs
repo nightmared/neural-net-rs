@@ -20,9 +20,9 @@ use glutin::GlContext;
 use rand::{thread_rng, Rng};
 
 const TEST_SIZE: usize = 150;
-const ITERS: usize = 500;
-const BATCH_SIZE: usize = 100;
-const EPS: f64 = 0.02;
+const ITERS: usize = 2000;
+const BATCH_SIZE: usize = 25;
+const EPS: f64 = 0.01;
 
 fn main() {
     //let train_mnist = Mnist::new("train-images.idx3-ubyte", "train-labels.idx1-ubyte").unwrap();
@@ -45,11 +45,12 @@ fn main() {
 	train.number -= TEST_SIZE;
     let mut rng = thread_rng();
 
-    let mut brain = Brain::new(train.img_len*train.img_len);
-    brain.add_layer(1500);
-    brain.add_layer(250);
-    brain.add_layer(25);
-    brain.add_layer(train.out_len);
+    let mut brain = Brain::load_from_file(File::open("brain").unwrap()).unwrap();
+    //let mut brain = Brain::new(train.img_len*train.img_len);
+    //brain.add_layer(1500);
+    //brain.add_layer(250);
+    //brain.add_layer(25);
+    //brain.add_layer(train.out_len);
 
     //show_gui(&mut brain, &train, &test, &mut rng);
 
@@ -59,10 +60,12 @@ fn main() {
         // Select BATCH_SIZE random elements
         let idx = rng.gen::<usize>()%(train.number-BATCH_SIZE);
         brain.backpropagation(&train.images[idx..idx+BATCH_SIZE], &train.results[idx..idx+BATCH_SIZE]).unwrap();
-        let test_res = train.measure_error(&mut brain, &mut rng);
-        println!("{}/{} batches processed, error is {}", i+1, ITERS, test_res);
-        if test_res < EPS {
-            break;
+        if i % 10 == 0 {
+            let test_res = train.measure_error(&mut brain, &mut rng);
+            println!("{}/{} batches processed, error is {}", i+1, ITERS, test_res);
+            if test_res < EPS {
+                break;
+            }
         }
     }
     println!("Error after training on train data: {}", train.measure_error(&mut brain, &mut rng));
